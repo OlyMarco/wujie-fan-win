@@ -146,7 +146,7 @@ Missing keys fall back to compiled defaults, so deleting the file keeps everythi
 ## Credits
 
 - Linux original & EC register map: [jpy794/wujie-fan-control](https://github.com/jpy794/wujie-fan-control)
-- Port I/O: [WinIo](https://github.com/yfdyh000/WinIo)
+- Port I/O: WinIo
 
 ## License
 
