@@ -4,7 +4,7 @@ Fan control for the **Wujie 16 Pro** laptop on Windows — a tiny systray app pl
 
 Tray icon, live RPM/temperature readout, preset switching, a per-fan custom slider, and a `max` mode that rides CPU load between configurable bounds. No installer, no runtime, no telemetry — just C and a kernel I/O driver.
 
-> Ported from the Linux [jpy794/wujie-fan-control](https://github.com/jpy794/wujie-fan-control) register map to Windows via [WinIo](https://github.com/yfdyh000/WinIo) (Super I/O `0x4E/0x4F` indirect EC SRAM access on the IT5570).
+> Ported from the Linux [jpy794/wujie-fan-control](https://github.com/jpy794/wujie-fan-control) register map to Windows via WinIo (Super I/O `0x4E/0x4F` indirect EC SRAM access on the IT5570).
 
 ## Features
 
