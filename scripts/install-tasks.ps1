@@ -1,4 +1,4 @@
-﻿# install-tasks.ps1 - register FanTray + FanBoot scheduled tasks (logon trigger, elevated)
+# install-tasks.ps1 - register FanTray + FanBoot scheduled tasks (logon trigger, elevated)
 #requires -version 5
 $root = Split-Path -Parent $PSScriptRoot
 $tray = "$root\build\fantray.exe"
@@ -17,4 +17,13 @@ if (-not (Test-Path $tray)) { Write-Host "build first (scripts\build.ps1)" -Fore
 
 schtasks /create /tn FanTray /tr ('"' + $tray + '"') /sc onlogon /rl highest /f
 schtasks /create /tn FanBoot /tr ('"' + $boot + '"') /sc onstart /ru SYSTEM /f
+
+# allow running on battery (schtasks defaults disallow on batteries)
+foreach ($name in 'FanTray','FanBoot') {
+    $t = Get-ScheduledTask -TaskName $name
+    $t.Settings.DisallowStartIfOnBatteries = $false
+    $t.Settings.StopIfGoingOnBatteries = $false
+    Set-ScheduledTask -InputObject $t | Out-Null
+}
+
 Write-Host "tasks installed: FanTray (logon, elevated) + FanBoot (boot, SYSTEM) — fanboot silences fans before logon" -ForegroundColor Green
