@@ -45,6 +45,8 @@ static char      g_mode[32] = "auto";
 static int       g_p1 = -1, g_p2 = -1;
 static int       g_max_target = 0;          /* max-mode dynamic target */
 static BOOL      g_iconOk = FALSE;          /* tray icon added successfully */
+static int       g_ec_ok = 0;              /* ec_init succeeded */
+static BOOL      g_sleeping = FALSE;        /* system suspended (sleep/hibernate) */
 static ULONGLONG g_prev_total = 0, g_prev_idle = 0;
 
 /* ---- CPU usage 0-100 via GetSystemTimes ---- */
@@ -277,6 +279,18 @@ static void build_menu(void) {
     AppendMenuA(g_menu, MF_STRING, IDC_EXIT, "Exit");
 }
 
+static BOOL is_restart(void) {
+    HKEY hKey;
+    DWORD val = 0, sz = sizeof(val);
+    if (RegOpenKeyExA(HKEY_LOCAL_MACHINE,
+        "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Reliability",
+        0, KEY_READ, &hKey) == ERROR_SUCCESS) {
+        RegQueryValueExA(hKey, "ShutdownType", NULL, NULL, (LPBYTE)&val, &sz);
+        RegCloseKey(hKey);
+    }
+    return (val == 2);
+}
+
 static LRESULT CALLBACK wnd_proc(HWND h, UINT m, WPARAM w, LPARAM l) {
     POINT pt;
     char status[192];
@@ -285,23 +299,25 @@ static LRESULT CALLBACK wnd_proc(HWND h, UINT m, WPARAM w, LPARAM l) {
         if (l == WM_RBUTTONUP || l == WM_LBUTTONUP) {
             GetCursorPos(&pt);
             SetForegroundWindow(h);
-            do_status(g_menu, status, sizeof status);
+            if (g_ec_ok) do_status(g_menu, status, sizeof status);
             TrackPopupMenu(g_menu, TPM_RIGHTBUTTON, pt.x, pt.y, 0, h, NULL);
         }
         return 0;
     case WM_COMMAND:
         switch (LOWORD(w)) {
         case IDC_CUSTOM:
-            sync_sliders();
-            ShowWindow(g_hPopup, SW_SHOWNORMAL);
-            SetForegroundWindow(g_hPopup);
+            if (g_ec_ok) {
+                sync_sliders();
+                ShowWindow(g_hPopup, SW_SHOWNORMAL);
+                SetForegroundWindow(g_hPopup);
+            }
             return 0;
         case IDC_EXIT:
             Shell_NotifyIconA(NIM_DELETE, &g_nid);
             PostQuitMessage(0);
             return 0;
         default:
-            if (LOWORD(w) >= IDC_PRESET0 && LOWORD(w) < IDC_PRESET0 + fan_preset_count) {
+            if (g_ec_ok && LOWORD(w) >= IDC_PRESET0 && LOWORD(w) < IDC_PRESET0 + fan_preset_count) {
                 int idx = LOWORD(w) - IDC_PRESET0;
                 ec_apply_preset(fan_presets[idx].name);
                 if (strcmp(fan_presets[idx].name, "max") == 0)
@@ -312,27 +328,39 @@ static LRESULT CALLBACK wnd_proc(HWND h, UINT m, WPARAM w, LPARAM l) {
     case WM_TIMER:
         if (w == TIMER_POLL) {
             if (!g_iconOk) g_iconOk = Shell_NotifyIconA(NIM_ADD, &g_nid);
-            do_status(NULL, status, sizeof status);
-            lstrcpynA(g_nid.szTip, status, sizeof g_nid.szTip);
-            if (g_iconOk) Shell_NotifyIconA(NIM_MODIFY, &g_nid);
-            if (strcmp(g_mode, "max") == 0) {
-                int load = cpu_usage();
-                int mn = g_config.max_min, mx = g_config.max_max, stp = g_config.max_ramp_step;
-                int target = mn + (mx - mn) * load / 100;
-                int diff;
-                if (g_max_target == 0) g_max_target = ec_read_target(1);
-                if (g_max_target < mn) g_max_target = mn;
-                diff = target - g_max_target;
-                if (diff > stp) diff = stp;
-                if (diff < -stp) diff = -stp;
-                g_max_target += diff;
-                if (g_max_target < mn) g_max_target = mn;
-                if (g_max_target > mx) g_max_target = mx;
-                ec_set_manual(1);
-                ec_set_target(1, g_max_target);
-                ec_set_target(2, g_max_target);
+            if (g_ec_ok) {
+                do_status(NULL, status, sizeof status);
+                lstrcpynA(g_nid.szTip, status, sizeof g_nid.szTip);
+                if (g_iconOk) Shell_NotifyIconA(NIM_MODIFY, &g_nid);
+                if (strcmp(g_mode, "max") == 0) {
+                    int load = cpu_usage();
+                    int mn = g_config.max_min, mx = g_config.max_max, stp = g_config.max_ramp_step;
+                    int target = mn + (mx - mn) * load / 100;
+                    int diff;
+                    if (g_max_target == 0) g_max_target = ec_read_target(1);
+                    if (g_max_target < mn) g_max_target = mn;
+                    diff = target - g_max_target;
+                    if (diff > stp) diff = stp;
+                    if (diff < -stp) diff = -stp;
+                    g_max_target += diff;
+                    if (g_max_target < mn) g_max_target = mn;
+                    if (g_max_target > mx) g_max_target = mx;
+                    ec_set_manual(1);
+                    ec_set_target(1, g_max_target);
+                    ec_set_target(2, g_max_target);
+                }
             }
         }
+        return 0;
+    case WM_POWERBROADCAST:
+        g_sleeping = (w == PBT_APMSUSPEND);
+        return TRUE;
+    case WM_ENDSESSION:
+        if (w && g_ec_ok && !g_sleeping && !is_restart())
+            ec_set_manual(0);   /* restore EC auto only on real power-off shutdown */
+        KillTimer(h, TIMER_POLL);
+        Shell_NotifyIconA(NIM_DELETE, &g_nid);
+        PostQuitMessage(0);
         return 0;
     case WM_DESTROY:
         KillTimer(h, TIMER_POLL);
@@ -352,12 +380,17 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE prev, LPSTR cmd, int show) {
 
     (void)prev; (void)cmd; (void)show;
     g_hInst = hInst;
+
+    /* single instance — exit if another fantray is already running */
+    {
+        HANDLE hM = CreateMutexA(NULL, TRUE, "Global\\fantray_singleton");
+        if (GetLastError() == ERROR_ALREADY_EXISTS) { CloseHandle(hM); return 0; }
+    }
+
     InitCommonControls();
 
-    if (ec_init()) {
-        MessageBoxA(NULL, "EC init failed (need admin + WINIO driver)", "fan-tray", MB_ICONERROR);
-        return 1;
-    }
+    config_load();
+    if (ec_init() == 0) { g_ec_ok = 1; ec_apply_preset(g_config.boot_preset); }
 
     wc.lpfnWndProc = wnd_proc;
     wc.hInstance = hInst;
@@ -376,7 +409,7 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE prev, LPSTR cmd, int show) {
     g_nid.uCallbackMessage = WM_TRAYICON;
     ico = create_fan_icon();
     g_nid.hIcon = ico ? ico : LoadIcon(NULL, IDI_APPLICATION);
-    do_status(NULL, status, sizeof status);
+    if (g_ec_ok) do_status(NULL, status, sizeof status);
     lstrcpynA(g_nid.szTip, status, sizeof g_nid.szTip);
     g_iconOk = Shell_NotifyIconA(NIM_ADD, &g_nid);
 
@@ -385,6 +418,6 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE prev, LPSTR cmd, int show) {
         TranslateMessage(&msg);
         DispatchMessage(&msg);
     }
-    ec_shutdown();
+    if (g_ec_ok) ec_shutdown();
     return 0;
 }

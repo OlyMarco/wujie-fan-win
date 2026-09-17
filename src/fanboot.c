@@ -1,5 +1,6 @@
-/* fanboot.c - boot smooth ramp: wait 15s after logon, then apply silent preset.
- * Tray app is started immediately; this runs alongside.
+/* fanboot.c - boot silence: runs at system boot (before logon) as SYSTEM,
+ * waits boot_delay_ms, then applies boot_preset (default silent) to quiet
+ * fans ASAP. ec_init retries until the WinIo driver is ready.
  */
 #include <windows.h>
 #include <stdio.h>

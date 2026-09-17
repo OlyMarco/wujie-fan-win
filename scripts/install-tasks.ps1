@@ -16,5 +16,5 @@ if (-not $pr.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
 if (-not (Test-Path $tray)) { Write-Host "build first (scripts\build.ps1)" -ForegroundColor Red; exit 1 }
 
 schtasks /create /tn FanTray /tr ('"' + $tray + '"') /sc onlogon /rl highest /f
-schtasks /create /tn FanBoot /tr ('"' + $boot + '"') /sc onlogon /rl highest /f
-Write-Host "tasks installed: FanTray + FanBoot (logon trigger, highest privileges)" -ForegroundColor Green
+schtasks /create /tn FanBoot /tr ('"' + $boot + '"') /sc onstart /ru SYSTEM /f
+Write-Host "tasks installed: FanTray (logon, elevated) + FanBoot (boot, SYSTEM) — fanboot silences fans before logon" -ForegroundColor Green
